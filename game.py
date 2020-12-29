@@ -13,6 +13,9 @@ black = (0, 0, 0)
 red = (213, 50, 80)
 green = (0, 255, 0)
 blue = (50, 153, 213)
+lightblue = (51, 255, 255)
+pink = (255, 51, 153)
+orange = (255, 178, 102)
  
 dis_width = 800
 dis_height = 600
@@ -48,8 +51,9 @@ def message(msg, color):
 
 
 map_predict = [pygame.K_LEFT, pygame.K_RIGHT, pygame.K_UP, pygame.K_DOWN]
-mutate_ratio = 0.4
-random_action = 0.3
+mutate_ratio = 0.2
+random_action = 0.05
+epsilon = 0.01
 
 class NeuralNetwork:
     def __init__(self, model = None, map_output=[], input_nodes = None, hidden_nodes = None, output_Nodes = None, dropout_percentage=0.02):
@@ -101,7 +105,7 @@ class NeuralNetwork:
 
     def create_model(self):
         model = tf.keras.Sequential([
-            tf.keras.layers.Dense(self.hidden_nodes, activation='sigmoid', input_shape=self.input_nodes),
+            tf.keras.layers.Dense(self.hidden_nodes, activation='relu', input_shape=self.input_nodes),
             tf.keras.layers.Dropout(self.dropout_percentage),
             tf.keras.layers.Dense(self.output_Nodes, activation='softmax')
         ])    
@@ -120,7 +124,7 @@ class Snake:
         self.sensors_size = self.width * 15
         self.sensors_angles = [0, math.radians(90), math.radians(180), math.radians(270), math.radians(45), math.radians(135), math.radians(225), math.radians(315)]
         self.sensors_detect = [0,0,0,0,0,0,0,0]
-        self.sensors_color = (red,green)
+        self.sensors_color = (red,green,yellow)
         self.loses = False
         self.brain = brain
         self.liveOn = 0
@@ -160,8 +164,8 @@ class Snake:
 
     def think(self):
         predict = self.brain.predict(self.get_sensors())
-        if (random.uniform(0, 1) < random_action):
-            self._move(round(random.randrange(0, len(map_predict))))
+        if (np.random.uniform(0,1,1)[0] <= random_action):
+            self._move(np.random.uniform(0,len(map_predict),1)[0])
         else:
             self._move(predict)
 
@@ -204,14 +208,38 @@ class Snake:
         self._move(moviment)
 
     def get_sensors(self):
-        def isBetween(x1, y1, x2, y2, x3, y3):
+        def isBetween(x1, y1, x2, y2, x, y):
+            ab = math.sqrt((x2-x1)*(x2-x1)+(y2-y1)*(y2-y1))
+            ap = math.sqrt((x-x1)*(x-x1)+(y-y1)*(y-y1))
+            pb = math.sqrt((x2-x)*(x2-x)+(y2-y)*(y2-y))
+            if(ab == ap + pb):
+                return True
+
+        """ def isBetween(x1, y1, x2, y2, x3, y3):
+            crossproduct = (y3 - y1) * (x2 - x1) - (x3 - x1) * (y2 - y1)
+
+            # compare versus epsilon for floating point values, or != 0 if using integers
+            if abs(crossproduct) > epsilon:
+                return False
+
+            dotproduct = (x3 - x1) * (x2 - x1) + (y3 - y1)*(y2 - y1)
+            if dotproduct < 0:
+                return False
+
+            squaredlengthba = (x2 - x1)*(x2 - x1) + (y2 - y1)*(y2 - y1)
+            if dotproduct > squaredlengthba:
+                return False
+
+            return True """
+
+        """ def isBetween(x1, y1, x2, y2, x3, y3):
             if (x2 != x1):
                 slope = (y2 - y1) / (x2 - x1)
                 pt3_on = (y3 - y1) == slope * (x3 - x1)
                 pt3_between = (min(x1, x2) <= x3 <= max(x1, x2)) and (min(y1, y2) <= y3 <= max(y1, y2))
                 return pt3_on and pt3_between
             else:
-                return (x3 == x2) and (min(y1, y2) <= y3 <= max(y1, y2))
+                return (x3 == x2) and (min(y1, y2) <= y3 <= max(y1, y2)) """
 
         for i,angle in enumerate(self.sensors_angles):
             x1 = self.x + self.width / 2
@@ -219,9 +247,17 @@ class Snake:
             x2 = x1 + math.cos(angle) * self.sensors_size
             y2 = y1 + math.sin(angle) * self.sensors_size
 
-            self.sensors_detect[i] = 1 if isBetween(x1, y1, x2, y2, self.food.x + self.food.width / 2, self.food.y + self.food.height / 2) else 0
+            self.sensors_detect[i] = 2 if (x2 < 0 or x2 > self.board_width or y2 < 0 or y2 > self.board_height) else (1 if isBetween(x1, y1, x2, y2, self.food.x + self.food.width / 2, self.food.y + self.food.height / 2) else 0)
 
-        return [self.x, self.y, self.board_width-self.x-self.width/2, self.board_height - self.y - self.height / 2, *self.sensors_detect, self.pos[0][0], self.pos[0][1]]
+        return [
+            self.x / (self.board_width), self.y / (self.board_height), 
+            (self.board_width-self.x-self.width/2)  / (self.board_width), 
+            (self.board_height - self.y - self.height / 2) / (self.board_height), 
+            *list(map(
+                lambda x: (x + 1) / (3),
+                self.sensors_detect)), 
+            self.pos[0][0]  / (self.board_width), 
+            self.pos[0][1]  / (self.board_height)]
 
     def isCrashed(self):
         return self.x >= self.board_width or self.x < 0 or self.y >= self.board_height or self.y < 0 or self.pos[-1] in self.pos[:-1]
@@ -242,13 +278,12 @@ def cal_pop_fitness(snakes):
         lambda s: s.fitness,
         snakes
     )))
-    fitness_mean = np.mean(fitness_list)
-    liveOn_mean = np.mean(np.array(list(map(
+    liveOn_list = np.array(list(map(
         lambda s: s.liveOn,
         snakes
-    ))))
+    )))
     fitness = list(map(
-        lambda s: (s.fitness - fitness_mean) * 10 * ( ((s.fitness - np.min(fitness_list)) / (np.max(fitness_list) - np.min(fitness_list))) if np.max(fitness_list) - np.min(fitness_list) > 0 else 1 ) + (s.liveOn / liveOn_mean),
+        lambda s: (s.fitness - np.min(fitness_list) / (np.max(fitness_list) - np.min(fitness_list)) if np.max(fitness_list) - np.min(fitness_list) > 0 else 0 ) * 0.95 + (((s.liveOn - np.min(liveOn_list)) / (np.max(liveOn_list) - np.min(liveOn_list))) * 0.05),
         snakes
     ))
     return np.array(fitness)
@@ -270,10 +305,11 @@ def select_mating_pool(pop, fitness, num_parents):
 
     return parents
 
-def gameLoop(nSnakes = 1, max_gen = 1):
+def gameLoop(nSnakes = 8, max_gen = 200):
     game_over = False
     game_close = False
     exit_game = False
+    only_plays = False
 
     num_parents = round(nSnakes / 2)
 
@@ -289,6 +325,8 @@ def gameLoop(nSnakes = 1, max_gen = 1):
             break
 
         while not game_over and not exit_game:
+            dis.fill(blue)
+
             events = list(filter(
                 lambda e: e.type == pygame.KEYDOWN,
                 pygame.event.get()
@@ -309,8 +347,6 @@ def gameLoop(nSnakes = 1, max_gen = 1):
                     exit_game = True
                     break
 
-            dis.fill(blue)
-
             for snake in list(filter(
                 lambda x: x.loses == False,
                 population)):
@@ -319,14 +355,14 @@ def gameLoop(nSnakes = 1, max_gen = 1):
                     snake.loses = True
                     continue
             
-                snake.draw(True)
-                # snake.think()
+                #snake.draw(True)
+                snake.think()
                 snake.move(events)
             
             best = population[0]
-            # best.draw()
-            sensors = best.get_sensors()
-            draw_score(best.fitness, i, sensors)
+            best.draw(True)
+            # sensors = best.get_sensors()
+            draw_score(best.fitness, i, [])
 
             pygame.display.update()
 
@@ -343,14 +379,21 @@ def gameLoop(nSnakes = 1, max_gen = 1):
             childs.append(child)
 
         mutated_childs = []
+        clone_parents = []
+        for p in parents:
+            clone_parents.append(p.copy())
+
         for c in childs:
             mutated_childs.append(c.mutate())
 
-        new_population = [*parents, *mutated_childs]
+        new_population = [*clone_parents, *mutated_childs]
 
         for i,snake in enumerate(new_population):
             snake = new_population[i]
             snake.loses = False
+            snake.x = dis_width / 2
+            snake.y = dis_height / 2
+            snake.liveOn = 0
             new_population[i] = snake
 
         population = new_population
