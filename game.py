@@ -56,60 +56,77 @@ random_action = 0.05
 epsilon = 0.01
 
 class NeuralNetwork:
-    def __init__(self, model = None, map_output=[], input_nodes = None, hidden_nodes = None, output_Nodes = None, dropout_percentage=0.02):
-        self.input_nodes = input_nodes
-        self.hidden_nodes = hidden_nodes
-        self.output_Nodes = output_Nodes
+    def __init__(self, model = None, map_output=[], input_shape = None, hidden_shape = None, output_shape = None, dropout_percentage=0.02):
+        self.input_shape = input_shape
+        self.hidden_shape = hidden_shape
+        self.output_shape = output_shape
         self.dropout_percentage = dropout_percentage
         self.map_output = map_output
+        self.activations = ['relu', 'sigmoid', 'softmax']
         if model == None:
             model = self.create_model()
         self.model = model
-        # self.model.summary()
 
     def copy(self):
         model = self.create_model()
-        weights = self.model.get_weights()
-        model.set_weights(weights)
         return NeuralNetwork(
             model=model,
             map_output=self.map_output,
-            input_nodes=self.input_nodes,
-            hidden_nodes=self.hidden_nodes,
-            output_Nodes=self.output_Nodes,
+            input_shape=self.input_shape,
+            hidden_shape=self.hidden_shape,
+            output_shape=self.output_shape,
             dropout_percentage=self.dropout_percentage)
 
     def mutate(self):
-        weights = self.model.get_weights()
-        for i,l in enumerate(weights):
-            for j,w in enumerate(l):
-                if random.uniform(0, 1) <= mutate_ratio:
-                    weights[i][j] += np.random.normal(0, 0.1, 1)[0]
-        self.model.set_weights(weights)
+        for z,l in enumerate(self.model):
+            for i,r in enumerate(l):
+                for j in range(len(r)):
+                    if (np.random.uniform(0,1,1)[0] < mutate_ratio):
+                        self.model[z][i][j] = np.random.uniform(-1,1,1)[0]
         return self
 
     def crossover(self, other):
-        weights_1 = self.model.get_weights()
-        weights_2 = other.model.get_weights()
-        i, j = round(random.randrange(0, len(weights_1) - 1)), round(random.randrange(0, len(weights_1[0]) - 1))
-        weights_1[i][j], weights_2[i][j] = weights_2[i][j], weights_1[i][j]
-        model_1 = self.copy()
-        model_1.model.set_weights(weights_1)
-        return model_1
+        i = round(np.random.uniform(0,2,1)[0])
+
+        self.model[i] = other.model[i]
+        self.activations[i] = other.activations[i]
+
+        return self
 
 
     def predict(self, sensors):
-        x = np.asarray(sensors)
-        x = x.reshape(-1, self.input_nodes[0])
-        return self.map_output[np.argmax(self.model.predict(x))]
+        L1, L2, L3 = self.model
+        A1, A2, A3 = self.activations
+
+        X = np.array(sensors)
+        Z1 = np.matmul(L1, X)
+        O1 = getattr(self, A1)(Z1)
+        Z2 = np.matmul(L2, O1)
+        O2 = getattr(self, A2)(Z2)
+        Z3 = np.matmul(L3, O2)
+        Y = getattr(self, A3)(Z3)
+        return self.map_output[np.argmax(Y)]
+
+    def relu(self, values):
+        values[values < 0] = 0
+        return values
+
+    def sigmoid(self, values):
+        return np.array(list(map(
+            lambda x: 1 / (1 + math.exp(-x)),
+            values
+        )))
+
+    def softmax(self, values):
+        e_x = np.exp(values - np.max(values))
+        return e_x / e_x.sum()
 
     def create_model(self):
-        model = tf.keras.Sequential([
-            tf.keras.layers.Dense(self.hidden_nodes, activation='relu', input_shape=self.input_nodes),
-            tf.keras.layers.Dropout(self.dropout_percentage),
-            tf.keras.layers.Dense(self.output_Nodes, activation='softmax')
-        ])    
-        model.compile(optimizer='adam', loss='sparse_categorical_crossentropy', metrics=['sparse_categorical_accuracy'])
+        L1 = np.random.uniform(-1, 1, size=(self.input_shape[1], self.input_shape[0]))
+        L2 = np.random.uniform(-1, 1, size=(self.hidden_shape[1], self.hidden_shape[0]))
+        L3 = np.random.uniform(-1, 1, size=(self.output_shape[1], self.output_shape[0]))
+        model = [L1,L2,L3]
+
         return model
 
 class Snake:
@@ -130,7 +147,7 @@ class Snake:
         self.liveOn = 0
         self.food = Food(round(random.randrange(0, dis_width - snake_block) / 10.0) * 10.0,round(random.randrange(0, dis_height - snake_block) / 10.0) * 10.0)
         if self.brain == None:
-            self.brain = NeuralNetwork(input_nodes=(len(self.sensors_angles) + 6, ), hidden_nodes=32, output_Nodes=4, map_output=map_predict)
+            self.brain = NeuralNetwork(input_shape=(len(self.sensors_angles) + 6, 8), hidden_shape=(8, 32), output_shape=(32, 4), map_output=map_predict)
 
     def copy(self):
         return Snake(dis_width / 2, dis_height / 2, brain=self.brain)
@@ -165,7 +182,7 @@ class Snake:
     def think(self):
         predict = self.brain.predict(self.get_sensors())
         if (np.random.uniform(0,1,1)[0] <= random_action):
-            self._move(np.random.uniform(0,len(map_predict),1)[0])
+            self._move(round(np.random.uniform(0,len(map_predict) - 1,1)[0]))
         else:
             self._move(predict)
 
@@ -283,7 +300,7 @@ def cal_pop_fitness(snakes):
         snakes
     )))
     fitness = list(map(
-        lambda s: (s.fitness - np.min(fitness_list) / (np.max(fitness_list) - np.min(fitness_list)) if np.max(fitness_list) - np.min(fitness_list) > 0 else 0 ) * 0.95 + (((s.liveOn - np.min(liveOn_list)) / (np.max(liveOn_list) - np.min(liveOn_list))) * 0.05),
+        lambda s: (s.fitness - np.min(fitness_list) / (np.max(fitness_list) - np.min(fitness_list)) if np.max(fitness_list) - np.min(fitness_list) > 0 else 0 ) * 0.95 + ((((s.liveOn - np.min(liveOn_list)) / (np.max(liveOn_list) - np.min(liveOn_list))) if np.max(liveOn_list) - np.min(liveOn_list) > 0 else 0) * 0.05),
         snakes
     ))
     return np.array(fitness)
@@ -305,7 +322,7 @@ def select_mating_pool(pop, fitness, num_parents):
 
     return parents
 
-def gameLoop(nSnakes = 8, max_gen = 200):
+def gameLoop(nSnakes = 16, max_gen = 200):
     game_over = False
     game_close = False
     exit_game = False
