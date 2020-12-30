@@ -33,16 +33,13 @@ class Snake:
         self.max_distance = math.sqrt( self.board_width * self.board_width + self.board_height * self.board_height ) + 1 + epsilon
         self.food = Food(round(random.randrange(0, self.board_width - self.width) / 10.0) * 10.0,round(random.randrange(0, self.board_height - self.height) / 10.0) * 10.0, width=self.width, height=self.height, game=self.game, game_x=self.game_x)
 
-    def copy(self):
-        return Snake(self.board_width / 2, self.board_height / 2, brain=self.brain)
-
     def mutate(self):
         self.brain = self.brain.mutate()
         return self
 
     def crossover(self, other):
         brain = self.brain.crossover(other.brain)
-        return Snake(self.board_width / 2, self.board_height / 2, brain=brain)
+        return Snake(self.board_width/2, self.board_height/2, brain=brain, reward_eat=self.reward_eat, colision_body=self.colision_body, colision_walls=self.colision_walls, epsilon=self.epsilon, map_output=self.map_output, board_height=self.board_height, board_width=self.board_width, width=self.width, height=self.height, game_x=self.game_x, game=self.game)
 
     def get_line_equation(self):
         res = []

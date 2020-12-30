@@ -54,6 +54,7 @@ new_snake = 0.1
 reward_eat = 1000
 colision_body = True
 colision_walls = True
+mutate_ratio = 0.01
 
 def gameLoop(nSnakes = 400, max_gen = 1000):
     game_over = False
@@ -65,7 +66,7 @@ def gameLoop(nSnakes = 400, max_gen = 1000):
 
     population = []
     for i in range(nSnakes):
-        brain = NeuralNetwork(input_shape=(24, 32), hidden_shape=(32, 32), output_shape=(32, 4))
+        brain = NeuralNetwork(input_shape=(24, 32), hidden_shape=(32, 32), output_shape=(32, 4), mutate_ratio=mutate_ratio)
         snake = Snake(game_width/2, game_height/2, reward_eat=reward_eat, colision_body=colision_body, colision_walls=colision_walls, epsilon=epsilon, brain=brain, map_output=map_predict, board_height=game_height, board_width=game_width, width=snake_block, height=snake_block, game_x=game_x, game=dis)
         population.append(snake)
  
@@ -147,8 +148,7 @@ def gameLoop(nSnakes = 400, max_gen = 1000):
         new_snakes = []
         for _ in range(150):
             if (np.random.uniform(0,1,1)[0] < new_snake):
-                brain = NeuralNetwork(input_shape=(24, 32), hidden_shape=(32, 32), output_shape=(32, 4))
-        
+                brain = NeuralNetwork(input_shape=(24, 32), hidden_shape=(32, 32), output_shape=(32, 4), mutate_ratio=mutate_ratio)        
                 new_snakes.append(Snake(game_width/2, game_height/2, reward_eat=reward_eat, colision_body=colision_body, colision_walls=colision_walls, brain=brain, epsilon=epsilon, map_output=map_predict, board_height=game_height, board_width=game_width, width=snake_block, height=snake_block, game_x=game_x, game=dis))
 
         mutated_population[nSnakes - len(new_snakes):nSnakes] = new_snakes
