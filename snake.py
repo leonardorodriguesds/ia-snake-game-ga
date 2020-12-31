@@ -4,9 +4,31 @@ import pygame
 import random
 from colors import *
 from food import Food
+from nn import NeuralNetwork
 
 class Snake:
-    def __init__(self, x, y, size = 1, width=10,height=10,speed=1,board_width=800,board_height=600,brain=None,game_x=0,game=None, epsilon = 0.01, random_action = 0.005, map_output = [], colision_body=True, colision_walls=True, reward_eat=1000):
+    def __init__(self, 
+    x=0, 
+    y=0, 
+    size = 1, 
+    width=10,
+    height=10,
+    speed=1,
+    board_width=800,
+    board_height=600,
+    brain=None,
+    game_x=0,
+    game=None, 
+    epsilon = 0.01, 
+    random_action = 0.01, 
+    map_output = [], 
+    colision_body=True, 
+    colision_walls=True, 
+    reward_eat=1000, 
+    random_function = None, 
+    punishment_wrong_direction = 10,
+    reward_distance_dencrase = 15,
+    brain_kwargs = {"input_shape": (24, 16), "hidden_shapes": [], "output_shape": (16, 3)}):
         self.x, self.y, self.size = x, y, size
 
         self.pos = [(self.x, self.y)]
@@ -16,11 +38,11 @@ class Snake:
         self.board_width, self.board_height = board_width, board_height
         self.sensors_size = self.width * 15
         self.sensors_angles = [0, math.radians(90), math.radians(180), math.radians(270), math.radians(45), math.radians(135), math.radians(225), math.radians(315)]
-        self.sensors_detect = []
+        self.sensors_detect = np.empty(shape=(len(self.sensors_angles) * 3))
+        self.last_sensors = []
         self.sensors_color = (red,green,yellow)
         self.loses = False
-        self.brain = brain
-        self.timeToDeath = 250
+        self.timeToDeath = 300
         self.game_x = game_x
         self.epsilon = epsilon
         self.liveOn = 0
@@ -30,16 +52,52 @@ class Snake:
         self.colision_body = colision_body
         self.colision_walls = colision_walls
         self.reward_eat = reward_eat
+        self.prev_direction = -1
+        self.neural_activations = None
         self.max_distance = math.sqrt( self.board_width * self.board_width + self.board_height * self.board_height ) + 1 + epsilon
-        self.food = Food(round(random.randrange(0, self.board_width - self.width) / 10.0) * 10.0,round(random.randrange(0, self.board_height - self.height) / 10.0) * 10.0, width=self.width, height=self.height, game=self.game, game_x=self.game_x)
+        self.food = Food(math.floor(random.randrange(0, self.board_width - self.width) / 10.0) * 10.0,math.floor(random.randrange(0, self.board_height - self.height) / 10.0) * 10.0, width=self.width, height=self.height, game=self.game, game_x=self.game_x)
+        self.random_function = random_function
+        if self.random_function == None:
+            self.random_function = lambda *args,**kwargs: np.random.uniform(*args, **kwargs)
+        self.brain = brain
+        self.brain_kwargs = brain_kwargs
+        if self.brain == None:
+            self.brain = NeuralNetwork(**brain_kwargs)
+
+        self.punishment_wrong_direction = punishment_wrong_direction
+        self.reward_distance_dencrase = reward_distance_dencrase
 
     def mutate(self):
         self.brain = self.brain.mutate()
         return self
 
+    def copy(self, brain = None):
+        if brain == None:
+            brain = self.brain
+            
+        return Snake(x=self.board_width/2, 
+        y=self.board_height/2, 
+        size = 1,
+        speed = self.speed,
+        brain=brain, 
+        reward_eat=self.reward_eat, 
+        colision_body=self.colision_body, 
+        colision_walls=self.colision_walls, 
+        epsilon=self.epsilon, 
+        map_output=self.map_output, 
+        board_height=self.board_height, 
+        board_width=self.board_width, 
+        width=self.width, 
+        height=self.height, 
+        game_x=self.game_x, 
+        game=self.game, 
+        random_function = self.random_function, 
+        punishment_wrong_direction = self.punishment_wrong_direction,
+        reward_distance_dencrase = self.reward_distance_dencrase,
+        brain_kwargs = self.brain_kwargs)
+
     def crossover(self, other):
-        brain = self.brain.crossover(other.brain)
-        return Snake(self.board_width/2, self.board_height/2, brain=brain, reward_eat=self.reward_eat, colision_body=self.colision_body, colision_walls=self.colision_walls, epsilon=self.epsilon, map_output=self.map_output, board_height=self.board_height, board_width=self.board_width, width=self.width, height=self.height, game_x=self.game_x, game=self.game)
+        return self.copy(self.brain.crossover(other.brain))
 
     def get_line_equation(self):
         res = []
@@ -97,8 +155,6 @@ class Snake:
             res.append(flag)
         return res
 
-
-
     def draw(self, drawSensors=False):
         if drawSensors:
             line_equations = self.get_line_equation()
@@ -120,24 +176,43 @@ class Snake:
             self.size += 1
             self.timeToDeath = 200
 
-    def think(self):
-        predict = self.brain.predict(self.get_sensors())
-        if (np.random.uniform(0,1,1)[0] <= self.random_action):
-            self._move(round(np.random.uniform(0,len(self.map_output) - 1,1)[0]))
-        else:
-            self._move(self.map_output[predict])
+    def think(self, show_neural_activations = True):
+        self.last_sensors = self.sensors_detect
+        (predict, neural_activations) = self.brain.predict(self.get_sensors())
+        if (self.random_function(0,1) <= self.random_action):
+            predict = math.floor(self.random_function(0,3))
+        
+        self._move(predict, not_map=False)
+        self.neural_activations = neural_activations
 
-    def _move(self, moviment):
-        if moviment == pygame.K_LEFT and self.speed_x == 0:
+    def _move(self, moviment, not_map=True):
+        direct = moviment
+        if not not_map:
+            if self.map_output[self.prev_direction] in [pygame.K_LEFT, pygame.K_RIGHT]:
+                wrong_direction = pygame.K_LEFT if self.map_output[self.prev_direction] == pygame.K_RIGHT else pygame.K_RIGHT
+            else:
+                wrong_direction = pygame.K_UP if self.map_output[self.prev_direction] == pygame.K_DOWN else pygame.K_DOWN
+
+            direct = [x for x in self.map_output if x != wrong_direction][direct]
+
+        """ if ((direct in [pygame.K_LEFT, pygame.K_RIGHT] and self.speed_x != 0)
+        or (direct in [pygame.K_UP, pygame.K_DOWN] and self.speed_y != 0)
+        or (direct == self.prev_direction)):
+            self.reward(-self.punishment_wrong_direction) """
+
+        if (np.min(self.last_sensors) > np.min(self.sensors_detect)):
+            self.reward(self.reward_distance_dencrase)
+
+        if direct == pygame.K_LEFT and self.speed_x == 0:
             self.speed_x = -self.width * self.speed
             self.speed_y = 0
-        elif moviment == pygame.K_RIGHT and self.speed_x == 0:
+        elif direct == pygame.K_RIGHT and self.speed_x == 0:
             self.speed_x = self.width * self.speed
             self.speed_y = 0
-        elif moviment == pygame.K_UP and self.speed_y == 0:
+        elif direct == pygame.K_UP and self.speed_y == 0:
             self.speed_y = -self.height * self.speed
             self.speed_x = 0
-        elif moviment == pygame.K_DOWN and self.speed_y == 0:
+        elif direct == pygame.K_DOWN and self.speed_y == 0:
             self.speed_y = self.height * self.speed
             self.speed_x = 0
             
@@ -154,6 +229,8 @@ class Snake:
         if self.timeToDeath <= 0:
             self.loses = True
 
+        self.prev_direction = moviment
+
     def handle_colision(self):
         if not self.isCrashed():
             self.reward(1)
@@ -169,8 +246,8 @@ class Snake:
         if self.x == self.food.x and self.y == self.food.y:
             self.reward(self.reward_eat, True) 
 
-        if self.food.time == 0 or (self.x == self.food.x and self.y == self.food.y):
-            self.food = Food(round(random.randrange(0, self.board_width - self.width) / 10.0) * 10.0,round(random.randrange(0, self.board_height - self.height) / 10.0) * 10.0, width=self.width, height=self.height, game=self.game, game_x=self.game_x)
+        if (self.x == self.food.x and self.y == self.food.y):
+            self.food = Food(math.floor(random.randrange(0, self.board_width - self.width) / 10.0) * 10.0,math.floor(random.randrange(0, self.board_height - self.height) / 10.0) * 10.0, width=self.width, height=self.height, game=self.game, game_x=self.game_x)
 
 
     def move(self, events):
@@ -197,36 +274,32 @@ class Snake:
         y1 = self.y + self.height / 2
         x2 = self.food.x + self.food.width / 2
         y2 = self.food.y + self.food.height / 2
+        tx = self.pos[0][0] + self.width / 2
+        ty = self.pos[0][1] + self.height / 2
         line_equations = self.get_line_equation()
+        sensors_detect = []
 
         # Food detection
         food_colisions = self.sensor_colision(line_equations, self.food.x, self.food.y, self.food.width, self.food.height)
-        for i, c in enumerate(food_colisions):
-            if c:
-                self.sensors_detect.append(math.sqrt(math.pow(x2 - x1, 2) + math.pow(y2 - y1, 2)) / self.max_distance)
-            else:
-                self.sensors_detect.append(1)
-
-        # Tail detection
+        tail_colisions = []
         if (self.size > 1):
-            tx = self.pos[0][0] + self.width / 2
-            ty = self.pos[0][1] + self.height / 2
             tail_colisions = self.sensor_colision(line_equations, self.pos[0][0], self.pos[0][1], self.width, self.height)
-            for z, c in enumerate(tail_colisions):
-                if c:
-                    self.sensors_detect.append(math.sqrt(math.pow(tx - x1, 2) + math.pow(ty - y1, 2)) / self.max_distance)
-                else:
-                    self.sensors_detect.append(1)
-        else:
-            for z in range(len(self.sensors_angles)):
-                self.sensors_detect.append(1)
 
-        # Walls detection
-        for z, (x,y, _, _) in enumerate(line_equations):
-            i = len(self.sensors_angles) * 2 + z
-            self.sensors_detect.append(math.sqrt(math.pow(x - x1, 2) + math.pow(y - y1, 2)) / self.max_distance)
+        for i, (x,y, _, _) in enumerate(line_equations):
+            if food_colisions[i] == 1:
+                sensors_detect.append(math.sqrt(math.pow(x2 - x1, 2) + math.pow(y2 - y1, 2)))
+            else:
+                sensors_detect.append(self.max_distance)
+                
+            if (self.size > 1) and tail_colisions[i] == 1:
+                sensors_detect.append(math.sqrt(math.pow(tx - x1, 2) + math.pow(ty - y1, 2)))
+            else:
+                sensors_detect.append(self.max_distance)
+
+            sensors_detect.append(math.sqrt(math.pow(x - x1, 2) + math.pow(y - y1, 2)))
         
-        return self.sensors_detect
+        self.sensors_detect = np.array(sensors_detect)
+        return self.sensors_detect / np.linalg.norm(self.sensors_detect)
 
     def isCrashed(self):
         crash = False

@@ -1,56 +1,115 @@
 import math
 import numpy as np
-activations = ['relu', 'sigmoid']
+list_activations = ['relu', 'sigmoid', 'softplus']
+output_activations = ['softmax', 'softplus']
 
 class NeuralNetwork:
-    def __init__(self, model = None, input_shape = None, hidden_shape = None, output_shape = None, dropout_percentage=0.02, mutate_ratio = 0.01):
+    def __init__(self, 
+    model = None, 
+    bias = None,
+    random_weights_intensity = (-0.5, 0.5), 
+    random_bias_intensity = (-0.1, 0.1),
+    mutation_intensity = (-0.1, 0.1),
+    input_shape = None, 
+    hidden_shapes = [], 
+    output_shape = None, 
+    dropout_percentage=([0.2, 0.0]), 
+    random_function=None, 
+    crossover_probability = 0.5, 
+    activations = [], 
+    mutate_random_value = None, 
+    continue_mutate_probability = 0.005, 
+    continue_crossover_probability = 0.005):
         self.input_shape = input_shape
-        self.hidden_shape = hidden_shape
+        self.hidden_shapes = hidden_shapes
         self.output_shape = output_shape
         self.dropout_percentage = dropout_percentage
-        self.mutate_ratio = mutate_ratio
-        self.activations = ['relu', 'sigmoid', 'softmax']
+        self.continue_mutate_probability = continue_mutate_probability
+        self.continue_crossover_probability = continue_crossover_probability
+        self.random_function = random_function
+        self.crossover_probability = crossover_probability
+        self.random_weights_intensity = random_weights_intensity
+        self.random_bias_intensity = random_bias_intensity
+        self.mutation_intensity = mutation_intensity
+        if self.random_function == None:
+            self.random_function = lambda *args,**kwargs: np.random.uniform(*args, **kwargs)
+        self.mutate_random_value = mutate_random_value
+        if self.mutate_random_value == None:
+            self.mutate_random_value = lambda: np.random.uniform(self.mutation_intensity[0], self.mutation_intensity[1])
         if model == None:
-            model = self.create_model()
-        self.model = model
+            model,activations,gen_bias = self.create_model()
+        
+        self.bias = bias
+        if self.bias == None:
+            self.bias = gen_bias
+        self.model, self.activations = model,activations
 
     def copy(self):
-        model = self.create_model()
         return NeuralNetwork(
-            model=model,
-            input_shape=self.input_shape,
-            hidden_shape=self.hidden_shape,
-            output_shape=self.output_shape,
-            dropout_percentage=self.dropout_percentage)
+            model = self.model, 
+            bias = self.bias,
+            random_bias_intensity = self.random_bias_intensity,
+            random_weights_intensity = self.random_weights_intensity,
+            mutation_intensity = self.mutation_intensity,
+            activations=self.activations,
+            input_shape = self.input_shape, 
+            hidden_shapes = self.hidden_shapes, 
+            output_shape = self.output_shape, 
+            dropout_percentage = self.dropout_percentage, 
+            random_function = self.random_function, 
+            crossover_probability = self.crossover_probability,
+            mutate_random_value = self.mutate_random_value,
+            continue_mutate_probability = self.continue_mutate_probability,
+            continue_crossover_probability = self.continue_crossover_probability)
 
     def mutate(self):
-        for z,l in enumerate(self.model):
-            for i,r in enumerate(l):
-                for j in range(len(r)):
-                    if (np.random.uniform(0,1,1)[0] < self.mutate_ratio):
-                        self.model[z][i][j] = np.random.uniform(-1,1,1)[0]
+        def _mutate(model, mutate_random_value):
+            z = math.floor(self.random_function(0, len(model)))
+            i = math.floor(self.random_function(0, len(model[z])))
+            j = math.floor(self.random_function(0, len(model[z][i])))
+            model[z][i][j] += mutate_random_value()
+            return model
+
+        self.model = _mutate(self.model, self.mutate_random_value)
+        while self.random_function(0,1) <= self.continue_mutate_probability:
+            self.model = _mutate(self.model, self.mutate_random_value)
         return self
 
     def crossover(self, other):
-        i = round(np.random.uniform(0,2,1)[0])
+        offspring = self.copy()
+        model = offspring.model
 
-        self.model[i] = other.model[i]
-        self.activations[i] = other.activations[i]
+        def _crossover(model, other_model, random_function, crossover_probability):
+            res_model = np.copy(model)
+            for i in range(len(model)):
+                for j in range(model[i].shape[0] - 1):
+                    for k in range(model[i].shape[1] - 1):
+                        res_model[i][j, k] = np.random.choice([model[i][j, k], other_model[i][j, k]])
+                for j in range(model[i].shape[1]):
+                    res_model[i][0, j] = np.random.choice([model[i][0, j], other_model[i][0, j]])
+            return res_model
 
-        return self
+        model = _crossover(model, other.model, self.random_function, self.crossover_probability)
+        while self.random_function(0,1) <= self.continue_crossover_probability:
+            model = _crossover(model, other.model, self.random_function, self.crossover_probability)
+
+        offspring.model = model
+        return offspring
 
 
-    def predict(self, sensors):
-        L1, L2, L3 = self.model
-        A1, A2, A3 = self.activations
+    def predict(self, sensors, show_neural_activations = True):
+        Y = sensors
+        neural_activations = []
+        for i,L in enumerate(self.model):
+            X = Y
+            dropout = np.random.binomial(1, 1 - self.dropout_percentage[i], size=L.shape)
+            Lw = (L * dropout)
+            Z = (np.dot(Lw, X) + self.bias[i])
+            Y = getattr(self, self.activations[i])(Z)
+            neural_activations.append((Lw,Y))
 
-        X = np.array(sensors)
-        Z1 = np.matmul(L1, X)
-        O1 = getattr(self, A1)(Z1)
-        Z2 = np.matmul(L2, O1)
-        O2 = getattr(self, A2)(Z2)
-        Z3 = np.matmul(L3, O2)
-        Y = getattr(self, A3)(Z3)
+        if show_neural_activations:
+            return (np.argmax(Y), neural_activations)
         return np.argmax(Y)
 
     def relu(self, values):
@@ -67,14 +126,21 @@ class NeuralNetwork:
         e_x = np.exp(values - np.max(values))
         return e_x / e_x.sum()
 
-    def create_model(self):
-        L1 = np.random.uniform(-1, 1, size=(self.input_shape[1], self.input_shape[0]))
-        L2 = np.random.uniform(-1, 1, size=(self.hidden_shape[1], self.hidden_shape[0]))
-        L3 = np.random.uniform(-1, 1, size=(self.output_shape[1], self.output_shape[0]))
-        A1 = round(np.random.uniform(0,len(activations)-1,1)[0])
-        A2 = round(np.random.uniform(0,len(activations)-1,1)[0])
-        self.activations[0] = activations[A1]
-        self.activations[1] = activations[A2]
-        model = [L1,L2,L3]
+    def softplus(self, values):
+        return np.log(np.exp(values + 1))
 
-        return model
+    def create_model(self):
+        model = []
+        activations = []
+        bias = []
+        model.append(self.random_function(self.random_weights_intensity[0], self.random_weights_intensity[1], size=(self.input_shape[1], self.input_shape[0])))
+        bias.append(self.random_function(self.random_bias_intensity[0], self.random_bias_intensity[1], size=(self.input_shape[1], )))
+        activations.append(list_activations[math.floor(self.random_function(0,len(list_activations)))])
+        for (i,o) in self.hidden_shapes:
+            model.append(self.random_function(self.random_weights_intensity[0], self.random_weights_intensity[1], size=(o, i)))
+            bias.append(self.random_function(self.random_bias_intensity[0], self.random_bias_intensity[1], size=(o,)))
+            activations.append(list_activations[math.floor(self.random_function(0,len(list_activations)))])
+        model.append(self.random_function(self.random_weights_intensity[0], self.random_weights_intensity[1], size=(self.output_shape[1], self.output_shape[0])))
+        bias.append(self.random_function(self.random_bias_intensity[0], self.random_bias_intensity[1], size=(self.output_shape[1],)))
+        activations.append(output_activations[math.floor(self.random_function(0,len(output_activations)))])
+        return (model,activations,bias)
