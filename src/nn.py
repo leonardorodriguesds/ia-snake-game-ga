@@ -1,29 +1,32 @@
 import math
 import numpy as np
 list_activations = ['relu', 'sigmoid', 'softplus']
-output_activations = ['softmax', 'softplus']
+output_activations = ['softmax', 'softplus', 'sigmoid']
 
 class NeuralNetwork:
     def __init__(self, 
-    model = None, 
-    bias = None,
-    random_weights_intensity = (-0.5, 0.5), 
-    random_bias_intensity = (-0.1, 0.1),
-    mutation_intensity = (-0.1, 0.1),
-    input_shape = None, 
-    hidden_shapes = [], 
-    output_shape = None, 
-    dropout_percentage=([0.2, 0.0]), 
-    random_function=None, 
-    crossover_probability = 0.5, 
-    activations = [], 
-    mutate_random_value = None, 
-    continue_mutate_probability = 0.005, 
-    continue_crossover_probability = 0.005):
+        model = None, 
+        bias = None,
+        random_weights_intensity = (-0.5, 0.5), 
+        random_bias_intensity = (-0.1, 0.1),
+        dropout_intensity = (0.0, 0.005),
+        mutation_intensity = (-0.1, 0.1),
+        input_shape = None, 
+        hidden_shapes = [], 
+        output_shape = None, 
+        dropout_percentage=None, 
+        random_function=None, 
+        crossover_probability = 0.5, 
+        activations = [], 
+        mutate_random_value = None, 
+        continue_mutate_probability = 0.005, 
+        continue_crossover_probability = 0.005,
+        shuffle_probability = 0
+    ):
         self.input_shape = input_shape
         self.hidden_shapes = hidden_shapes
         self.output_shape = output_shape
-        self.dropout_percentage = dropout_percentage
+        self.dropout_intensity = dropout_intensity
         self.continue_mutate_probability = continue_mutate_probability
         self.continue_crossover_probability = continue_crossover_probability
         self.random_function = random_function
@@ -36,6 +39,7 @@ class NeuralNetwork:
         self.mutate_random_value = mutate_random_value
         if self.mutate_random_value == None:
             self.mutate_random_value = lambda: np.random.uniform(self.mutation_intensity[0], self.mutation_intensity[1])
+        gen_bias = []
         if model == None:
             model,activations,gen_bias = self.create_model()
         
@@ -43,6 +47,18 @@ class NeuralNetwork:
         if self.bias == None:
             self.bias = gen_bias
         self.model, self.activations = model,activations
+
+        self.dropout_percentage = dropout_percentage
+        if self.dropout_percentage == None:
+            self.dropout_percentage = []
+            self.dropout_percentage.append(self.random_function(self.dropout_intensity[0], self.dropout_intensity[1]))
+            for _ in range(len(self.hidden_shapes)):
+                self.dropout_percentage.append(self.random_function(self.dropout_intensity[0], self.dropout_intensity[1]))
+            self.dropout_percentage.append(self.random_function(self.dropout_intensity[0], self.dropout_intensity[1]))
+
+        self.shuffle_probability = shuffle_probability
+        if (shuffle_probability > 0.0):
+            self.shuffle()
 
     def copy(self):
         return NeuralNetwork(
@@ -60,7 +76,19 @@ class NeuralNetwork:
             crossover_probability = self.crossover_probability,
             mutate_random_value = self.mutate_random_value,
             continue_mutate_probability = self.continue_mutate_probability,
-            continue_crossover_probability = self.continue_crossover_probability)
+            continue_crossover_probability = self.continue_crossover_probability,
+            dropout_intensity = self.dropout_intensity,
+            shuffle_probability = self.shuffle_probability)
+
+    def shuffle(self):
+        model = self.model
+        for z in range(len(self.model)):
+            for i in range(len(model[z])):
+                for j in range(len(model[z][i])):
+                    if self.random_function(0, 1) <= self.shuffle_probability:
+                        model[z][i][j] += self.mutate_random_value()
+
+        self.model = model
 
     def mutate(self):
         def _mutate(model, mutate_random_value):
@@ -102,11 +130,18 @@ class NeuralNetwork:
         neural_activations = []
         for i,L in enumerate(self.model):
             X = Y
-            dropout = np.random.binomial(1, 1 - self.dropout_percentage[i], size=L.shape)
-            Lw = (L * dropout)
-            Z = (np.dot(Lw, X) + self.bias[i])
-            Y = getattr(self, self.activations[i])(Z)
-            neural_activations.append((Lw,Y))
+            Z = (np.dot(L, X) + self.bias[i])
+            dropout = np.random.binomial(1, 1 - self.dropout_percentage[i], size=Z.shape)
+            if self.activations[i] == 'relu':
+                Z = self.relu(Z)
+            elif self.activations[i] == 'sigmoid':
+                Z = self.sigmoid(Z)
+            elif self.activations[i] == 'softmax':
+                Z = self.softmax(Z)
+            elif self.activations[i] == 'softplus':
+                Z = self.softplus(Z)
+            Y = Z * dropout
+            neural_activations.append((L,Y))
 
         if show_neural_activations:
             return (np.argmax(Y), neural_activations)

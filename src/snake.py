@@ -23,12 +23,13 @@ class Snake:
     random_action = 0.01, 
     map_output = [], 
     colision_body=True, 
-    colision_walls=True, 
-    reward_eat=1000, 
+    colision_walls=True,
     random_function = None, 
-    punishment_wrong_direction = 10,
-    reward_distance_dencrase = 15,
-    brain_kwargs = {"input_shape": (24, 16), "hidden_shapes": [], "output_shape": (16, 3)}):
+    punishment_wrong_direction = 5,
+    reward_distance_dencrase = 6,
+    limit_moves = True,
+    brain_kwargs = {"input_shape": (24, 16), "hidden_shapes": [], "output_shape": (16, 3)},
+    individual = None):
         self.x, self.y, self.size = x, y, size
 
         self.pos = [(self.x, self.y)]
@@ -42,7 +43,8 @@ class Snake:
         self.last_sensors = []
         self.sensors_color = (red,green,yellow)
         self.loses = False
-        self.timeToDeath = 300
+        self.limit_moves = limit_moves
+        self.timeToDeath = 250
         self.game_x = game_x
         self.epsilon = epsilon
         self.liveOn = 0
@@ -51,8 +53,9 @@ class Snake:
         self.random_action = random_action
         self.colision_body = colision_body
         self.colision_walls = colision_walls
-        self.reward_eat = reward_eat
-        self.prev_direction = -1
+        self.apples = 0
+        self.steps = 0
+        self.directions = []
         self.neural_activations = None
         self.max_distance = math.sqrt( self.board_width * self.board_width + self.board_height * self.board_height ) + 1 + epsilon
         self.food = Food(math.floor(random.randrange(0, self.board_width - self.width) / 10.0) * 10.0,math.floor(random.randrange(0, self.board_height - self.height) / 10.0) * 10.0, width=self.width, height=self.height, game=self.game, game_x=self.game_x)
@@ -62,6 +65,8 @@ class Snake:
         self.brain = brain
         self.brain_kwargs = brain_kwargs
         if self.brain == None:
+            if individual:
+                brain_kwargs = individual
             self.brain = NeuralNetwork(**brain_kwargs)
 
         self.punishment_wrong_direction = punishment_wrong_direction
@@ -80,7 +85,6 @@ class Snake:
         size = 1,
         speed = self.speed,
         brain=brain, 
-        reward_eat=self.reward_eat, 
         colision_body=self.colision_body, 
         colision_walls=self.colision_walls, 
         epsilon=self.epsilon, 
@@ -94,7 +98,8 @@ class Snake:
         random_function = self.random_function, 
         punishment_wrong_direction = self.punishment_wrong_direction,
         reward_distance_dencrase = self.reward_distance_dencrase,
-        brain_kwargs = self.brain_kwargs)
+        brain_kwargs = self.brain_kwargs,
+        limit_moves = self.limit_moves)
 
     def crossover(self, other):
         return self.copy(self.brain.crossover(other.brain))
@@ -170,38 +175,45 @@ class Snake:
         self.food.draw()
         
 
-    def reward(self, reward, eat=False):
-        self.fitness += reward
+    def reward(self, eat=False):
+        self.steps += 1
         if eat:
             self.size += 1
+            self.apples += 1
             self.timeToDeath = 200
 
-    def think(self, show_neural_activations = True):
+    def get_fitness(self):
+        self.fitness = self.steps + (math.pow(2, self.apples) + math.pow(self.apples, 2.1) * 500) - (math.pow(self.apples, 1.2) * math.pow((0.25 * self.steps), 1.3))
+        return self.fitness
+
+    def think(self, move = None, control = False, show_neural_activations = True):
         self.last_sensors = self.sensors_detect
         (predict, neural_activations) = self.brain.predict(self.get_sensors())
         if (self.random_function(0,1) <= self.random_action):
             predict = math.floor(self.random_function(0,3))
         
-        self._move(predict, not_map=False)
+        self._move(predict if not control else move, not_map=control)
         self.neural_activations = neural_activations
 
     def _move(self, moviment, not_map=True):
         direct = moviment
+        # wrong_direction = None
         if not not_map:
-            if self.map_output[self.prev_direction] in [pygame.K_LEFT, pygame.K_RIGHT]:
+            """ if self.map_output[self.prev_direction] in [pygame.K_LEFT, pygame.K_RIGHT]:
                 wrong_direction = pygame.K_LEFT if self.map_output[self.prev_direction] == pygame.K_RIGHT else pygame.K_RIGHT
             else:
-                wrong_direction = pygame.K_UP if self.map_output[self.prev_direction] == pygame.K_DOWN else pygame.K_DOWN
+                wrong_direction = pygame.K_UP if self.map_output[self.prev_direction] == pygame.K_DOWN else pygame.K_DOWN """
 
-            direct = [x for x in self.map_output if x != wrong_direction][direct]
+            direct = self.map_output[direct]
 
         """ if ((direct in [pygame.K_LEFT, pygame.K_RIGHT] and self.speed_x != 0)
         or (direct in [pygame.K_UP, pygame.K_DOWN] and self.speed_y != 0)
-        or (direct == self.prev_direction)):
-            self.reward(-self.punishment_wrong_direction) """
+        or (len(self.directions) > 0 and direct == self.directions[-1])):
+            lasts = self.directions[:-10]
+            self.reward(-self.punishment_wrong_direction * (10 if len(lasts) == lasts.count(direct) else 1))
 
         if (np.min(self.last_sensors) > np.min(self.sensors_detect)):
-            self.reward(self.reward_distance_dencrase)
+            self.reward(self.reward_distance_dencrase) """
 
         if direct == pygame.K_LEFT and self.speed_x == 0:
             self.speed_x = -self.width * self.speed
@@ -219,8 +231,10 @@ class Snake:
         self.x += self.speed_x
         self.y += self.speed_y
         self.liveOn += 1
-        self.pos.append((self.x,self.y))
-        self.timeToDeath -= 1
+        if ((self.x, self.y) not in self.pos):
+            self.pos.append((self.x,self.y))
+        if self.limit_moves:
+            self.timeToDeath -= 1
         if len(self.pos) > self.size:
             del self.pos[0]
 
@@ -229,11 +243,11 @@ class Snake:
         if self.timeToDeath <= 0:
             self.loses = True
 
-        self.prev_direction = moviment
+        self.directions.append(moviment)
 
     def handle_colision(self):
         if not self.isCrashed():
-            self.reward(1)
+            self.reward()
 
             if self.check_colision_walls():
                 if self.x < 0 or self.x > self.board_width:
@@ -244,7 +258,7 @@ class Snake:
             self.loses = True
 
         if self.x == self.food.x and self.y == self.food.y:
-            self.reward(self.reward_eat, True) 
+            self.reward(eat=True) 
 
         if (self.x == self.food.x and self.y == self.food.y):
             self.food = Food(math.floor(random.randrange(0, self.board_width - self.width) / 10.0) * 10.0,math.floor(random.randrange(0, self.board_height - self.height) / 10.0) * 10.0, width=self.width, height=self.height, game=self.game, game_x=self.game_x)
@@ -259,7 +273,7 @@ class Snake:
             else:
                 moviment = event.key
 
-        self._move(moviment)
+        self.think(move=moviment, control=True)
 
     def get_sensors(self):
         """ def isBetween(x1, y1, x2, y2, x, y):
@@ -287,12 +301,13 @@ class Snake:
 
         for i, (x,y, _, _) in enumerate(line_equations):
             if food_colisions[i] == 1:
-                sensors_detect.append(math.sqrt(math.pow(x2 - x1, 2) + math.pow(y2 - y1, 2)))
+                sensors_detect.append(0.85 * math.sqrt(math.pow(x2 - x1, 2) + math.pow(y2 - y1, 2)))
             else:
                 sensors_detect.append(self.max_distance)
                 
-            if (self.size > 1) and tail_colisions[i] == 1:
-                sensors_detect.append(math.sqrt(math.pow(tx - x1, 2) + math.pow(ty - y1, 2)))
+            if ((self.size > 1) and tail_colisions[i] == 1
+            and ((self.speed_x != 0 and self.sensors_angles[i] not in [0, math.radians(180)]) or (self.speed_y != 0 and self.sensors_angles[i] not in [math.radians(90), math.radians(270)]))):
+                sensors_detect.append(0.95 * math.sqrt(math.pow(tx - x1, 2) + math.pow(ty - y1, 2)))
             else:
                 sensors_detect.append(self.max_distance)
 
