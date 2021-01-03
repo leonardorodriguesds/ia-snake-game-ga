@@ -37,12 +37,17 @@ class GeneticAlgorithm:
     def generate_population(self, **kwargs):
         self.population = []
         loaded = len(self.sample) > 0
+        fitness = []
+        if loaded:
+            fitness = np.array(self.sample[0])
+            sum_fitness = np.sum(fitness)
+            fitness = fitness / sum_fitness
+
         for _ in range(self.population_size):
             individual_kwargs = {**self.population_kwargs}
             if (loaded):
-                idx = math.floor(self.random_function(0, len(self.sample)))
-                individual_kwargs['individual'] = {**self.sample[idx]}
-                individual_kwargs['individual']['shuffle_probability'] = 0.2
+                individual_kwargs['individual'] = {**np.random.choice(self.sample[1], p = fitness)}
+                individual_kwargs['individual']['shuffle_probability'] = 0.05
                 
             self.population.append(self.individual_class(**individual_kwargs))
         self.started = True

@@ -137,7 +137,7 @@ def init(
     if not os.path.exists(dir_name):
         os.mkdir(dir_name)
 
-    nns = []
+    nns = [[],[]]
     if load_nn:
         files = os.listdir(dir_name)
         regex = '(\d+)_nn_(\d+).pkl'
@@ -147,9 +147,10 @@ def init(
             result
         )), key=lambda x: x[1], reverse=True)
 
-        for (nn,_,_) in file_nns[:s]:
+        for (nn,fitness,_) in file_nns[:s]:
             with open(os.path.join(dir_name, nn), "rb") as input_file:
-                nns.append(pickle.load(input_file))
+                nns[0].append(fitness)
+                nns[1].append(pickle.load(input_file))
 
     population_kwargs = {
         'x':game_width/2, 
@@ -228,6 +229,7 @@ def gameLoop(
     draw_all = True,
     clock = None
 ):    
+    population = []
     while not ga.is_last_generation():
         population = ga.next_generation()
         game_over = False
@@ -291,7 +293,7 @@ def main():
     parser.add_argument('-population_size', default=300, type=int, help='Tamanho da população.')
     parser.add_argument('-num_generations', default=50, type=int, help='Número de gerações.')
     parser.add_argument('-sb', default=True, action='store_true', help='Salvar os melhores indivíduo.')
-    parser.add_argument('--s', default=10, type=int, help='Quantidade de invidíduos para salvar.')
+    parser.add_argument('--s', default=20, type=int, help='Quantidade de invidíduos para salvar.')
     parser.add_argument('-epsilon', default=0.01, type=float, help='Margem de erro a ser considerada.')
     parser.add_argument('-colision_body', default=True, action='store_false', help='Desligar colisão com o corpo.')
     parser.add_argument('-colision_walls', default=True, action='store_false', help='Desligar colisão com as paredes.')
